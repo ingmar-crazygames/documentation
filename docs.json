@@ -564,6 +564,18 @@
         ]
       },
       {
+        "tab": "Example Apps",
+        "groups": [
+          {
+            "group": "Example Applications",
+            "pages": [
+              "docs/example-apps/overview",
+              "docs/example-apps/task-management-app"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Developer Resources",
         "groups": [
           {"group": "Developer Resources",

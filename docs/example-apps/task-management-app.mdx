@@ -1,0 +1,303 @@
+---
+title: "Task Management App with SuprSend"
+description: "React application demonstrating notification infrastructure patterns"
+---
+
+# Task Management App with SuprSend Notifications
+
+> A React application demonstrating modern notification infrastructure with SuprSend
+
+This app shows how to integrate [SuprSend's notification infrastructure](https://docs.suprsend.com) into a React application with JWT authentication, multi-channel notifications, and user preference management.
+
+<CardGroup cols={2}>
+  <Card title="🔐 JWT Security" icon="shield">
+    ES256 token-based authentication instead of basic API keys
+  </Card>
+  <Card title="📱 Multi-Channel" icon="mobile">
+    Email, in-app, and push notifications working together
+  </Card>
+  <Card title="⚙️ User Control" icon="settings">
+    Granular preference management with category and channel controls
+  </Card>
+  <Card title="📊 Analytics" icon="chart">
+    Comprehensive event tracking for user behavior insights
+  </Card>
+</CardGroup>
+
+## Tech Stack
+
+```javascript
+{
+  "frontend": "React 18 + modern hooks",
+  "styling": "Tailwind CSS", 
+  "notifications": "@suprsend/react with JWT auth",
+  "security": "ES256 JWT tokens",
+  "state": "React hooks + localStorage",
+  "icons": "Lucide React"
+}
+```
+
+## Application Flow
+
+Here's how the notification system works in this app:
+
+1. **User authenticates** with JWT tokens for secure access
+2. **Creates a task** which automatically triggers notification events
+3. **In-app notifications** appear instantly in the notification feed
+4. **Toast notifications** provide immediate feedback
+5. **External users** receive email notifications when assigned tasks
+6. **Users control** their notification preferences granularly
+
+This creates a seamless notification experience where users stay informed without being overwhelmed.
+
+## Core Implementation
+
+### 1. JWT Authentication
+
+The app uses [SuprSend's enhanced security mode](https://docs.suprsend.com/docs/client-authentication) with JWT tokens:
+
+```javascript
+const handleSignInSuccess = useCallback(async (userResult, distinctId) => {
+  const token = await generateUserToken(distinctId, workspace);
+  setUserToken(token);
+  setCurrentUser({ distinctId, profile: userResult });
+}, [workspace]);
+```
+
+**Why JWT over API keys?**
+- **Enterprise Security**: ES256 elliptic curve signatures are unbreakable
+- **Automatic Expiration**: Tokens expire and refresh seamlessly
+- **Multi-tenant Support**: Isolated user contexts for different organizations
+
+### 2. Task Creation & Notifications
+
+When a user creates a task, the system automatically triggers notifications:
+
+```javascript
+const handleCreateTask = useCallback(async (taskData) => {
+  const newTask = {
+    id: Date.now().toString(),
+    title: taskData.title,
+    assignee: taskData.assignee, // Could be an email!
+    status: 'todo'
+  };
+  
+  setTasks(prevTasks => [...prevTasks, newTask]);
+  await trackTaskCreated(newTask); // 🎯 Triggers notification cascade
+}, [setTasks, trackTaskCreated]);
+```
+
+**What happens automatically:**
+1. **Task created** → `TASK_CREATED` event fired to SuprSend
+2. **In-app notification** → Appears instantly in the user's inbox
+3. **External assignee?** → Email workflow triggers automatically
+4. **Status changes** → `TASK_STATUS_CHANGED` event with real-time updates
+
+### 3. Multi-Channel Notifications
+
+#### In-App Notification Feed
+
+```javascript
+<Inbox 
+  pageSize={20} 
+  notificationComponent={CustomNotificationCard}
+/>
+```
+
+**Key Benefits:**
+- **Real-time Updates**: Notifications appear without page refresh
+- **Custom Branding**: Notification cards match your app's design
+- **Interactive**: Users can mark as read, archive, and manage notifications
+
+#### Toast Notifications
+
+```javascript
+const ToastNotification = () => {
+  const feedClient = useFeedClient();
+
+  useEffect(() => {
+    feedClient.emitter.on('feed.new_notification', (data) => {
+      toast.custom(<ToastNotificationCard notificationData={data} />);
+      feedClient.markAsSeen(data.n_id);
+    });
+  }, [feedClient]);
+
+  return <Toaster />;
+};
+```
+
+**Why toast notifications matter:**
+- **Immediate Awareness**: Users know instantly when something important happens
+- **Non-intrusive**: Brief, dismissible notifications don't interrupt workflow
+- **Flexible**: Works with any toast library (react-hot-toast, react-toastify, etc.)
+
+### 4. User Preference Management
+
+Users get granular control over their notification experience:
+
+```javascript
+// Category-level preferences
+await suprSendClient.user.preferences.updateCategoryPreference(
+  category,
+  preference
+);
+
+// Channel-level preferences  
+await suprSendClient.user.preferences.updateChannelPreferenceInCategory(
+  channel,
+  preference,
+  category
+);
+```
+
+**Three levels of control:**
+1. **Category Preferences**: "I want task updates but not marketing emails"
+2. **Channel Preferences**: "Email me but don't send push notifications"
+3. **Channel-within-Category**: "Email me task updates but not marketing emails"
+
+**User Benefits:**
+- **Personalized Experience**: Get only the notifications you want
+- **Reduced Noise**: No more notification fatigue
+- **Easy Management**: Intuitive interface for complex preferences
+
+## Notification Workflow Triggers
+
+The app uses several key workflow triggers to handle different notification scenarios:
+
+<CardGroup cols={2}>
+  <Card title="Task Assignment Email" icon="mail">
+    **Trigger**: `task_assigned_email`  
+    **Template**: Email with `{{task_title}}`, `{{assignee_name}}`  
+    **Category**: `transactional`
+  </Card>
+  <Card title="Status Change Notification" icon="bell">
+    **Trigger**: `TASK_STATUS_CHANGED`  
+    **Delivery**: In-app notification  
+    **Category**: `system`
+  </Card>
+  <Card title="Task Creation Alert" icon="plus">
+    **Trigger**: `TASK_CREATED`  
+    **Delivery**: In-app + toast  
+    **Category**: `system`
+  </Card>
+  <Card title="Due Date Reminder" icon="clock">
+    **Trigger**: `TASK_DUE_REMINDER`  
+    **Delivery**: Email + in-app  
+    **Category**: `transactional`
+  </Card>
+</CardGroup>
+
+### Workflow Implementation
+
+#### Task Assignment Workflow
+
+When you assign a task to someone outside your system:
+
+```javascript
+// External assignee workflow
+const trackTaskCreated = useCallback(async (taskData) => {
+  // 1. Send in-app notification to current user
+  await suprSendClient.track('TASK_CREATED', {
+    task_title: taskData.title,
+    task_id: taskData.id,
+    user_name: 'User',
+    timestamp: new Date().toISOString()
+  });
+
+  // 2. If assignee is external, send them an email
+  if (taskData.assignee && isEmailAddress(taskData.assignee)) {
+    const recipient = createRecipient(taskData.assignee, currentUser);
+    
+    // Trigger SuprSend workflow
+    await triggerWorkflow('task_assigned_email', [recipient], {
+      task_title: taskData.title,
+      assignee_email: taskData.assignee,
+      assigned_by: currentUser.name
+    });
+  }
+}, [suprSendClient]);
+```
+
+#### Status Change Workflow
+
+When users change task status:
+
+```javascript
+// Track task status changes with rich context
+const trackTaskStatusChange = useCallback(async (taskTitle, oldStatus, newStatus, taskId) => {
+  await suprSendClient.track('TASK_STATUS_CHANGED', {
+    task_title: taskTitle,
+    old_status: oldStatus,
+    new_status: newStatus,
+    task_id: taskId,
+    user_name: currentUser.name,
+    timestamp: new Date().toISOString()
+  });
+}, [suprSendClient]);
+```
+
+### Email Templates
+
+#### Task Assignment Email Template
+
+```html
+<!-- Task Assignment Email Template -->
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <h1 style="color: #2E70E8;">New Task Assigned!</h1>
+  <p>Hi {{assignee_name}},</p>
+  <p>{{assigned_by}} has assigned you a new task: <strong>{{task_title}}</strong></p>
+  <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+    <p><strong>Due Date:</strong> {{task_due_date}}</p>
+    <p><strong>Priority:</strong> {{task_priority}}</p>
+    <p><strong>Description:</strong> {{task_description}}</p>
+  </div>
+  <a href="{{task_url}}" style="background: #2E70E8; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Task</a>
+</div>
+```
+
+#### Status Change Email Template
+
+```html
+<!-- Status Change Email Template -->
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <h2 style="color: #2E70E8;">Task Status Updated</h2>
+  <p>The task <strong>{{task_title}}</strong> has been moved from <em>{{old_status}}</em> to <em>{{new_status}}</em>.</p>
+  <p>Updated by: {{updated_by}}</p>
+  <p>Time: {{timestamp}}</p>
+</div>
+```
+
+### Workflow Configuration
+
+**SuprSend Dashboard Setup:**
+
+1. **Create Workflows** in your SuprSend dashboard
+2. **Set up Triggers** for each event type
+3. **Configure Templates** with Handlebars variables
+4. **Set Categories** for proper organization
+5. **Test Workflows** with sample data
+
+**Key Variables Available:**
+- `{{task_title}}` - Task name
+- `{{assignee_name}}` - Person assigned to task
+- `{{assigned_by}}` - Person who assigned the task
+- `{{task_due_date}}` - Due date
+- `{{task_priority}}` - Priority level
+- `{{old_status}}` - Previous status
+- `{{new_status}}` - New status
+- `{{timestamp}}` - When the event occurred
+
+### Analytics & Tracking
+
+**Tracked Events:**
+- Task creation and assignment patterns
+- User engagement with notifications
+- Status change frequency
+- External collaboration metrics
+- Notification delivery success rates
+- User preference changes
+- Workflow performance metrics
+
+---
+
+*This application demonstrates how modern notification infrastructure can transform any app into an engaging, collaborative experience. Built with React and SuprSend.*
